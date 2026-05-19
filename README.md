@@ -6,7 +6,7 @@
 
 Dependabot and Renovate bump versions. GitHub Advanced Security flags issues. Neither rewrites your `cursor.execute(f"…{user_input}…")` into a parameterized query. vulnfix uses Claude Code to do the actual remediation, **then re-runs the scanner to verify the fix worked** — if it didn't, the change is rolled back, not committed.
 
-## Supported scanners (v0.2)
+## Supported scanners (v0.1.2)
 
 | Scanner | Finding kinds | Status |
 | --- | --- | --- |
@@ -40,7 +40,7 @@ paths:
 - uses: aquasecurity/trivy-action@master
   with: { scan-type: 'fs', format: 'json', output: 'trivy.json' }
 - run: pip install bandit semgrep && bandit -r . -f json -o bandit.json || true
-- uses: your-org/vulnfix@v1
+- uses: your-org/vulnfix@v0.1.2
   with:
     reports: 'trivy.json bandit.json'
   env:
@@ -48,13 +48,29 @@ paths:
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-## What's new in v0.2
+## What's new
 
-- **Per-repo config (`vulnfix.yml`)** with per-scanner overrides for mode, severity threshold, ignored rules
-- **Verification loop**: every code fix is re-scanned; unverified changes roll back automatically
-- **Cross-scanner dedup**: same CVE reported by Trivy and Grype = one finding, one fix
-- **Three new scanners**: Semgrep, gitleaks, Grype
-- **Telemetry hook** for the upcoming vulnfix Cloud dashboard (off by default, anonymized when on)
+### v0.1.2
+
+- **uv-managed Python projects**: Trivy reports against `uv.lock` or `Python` labels are now recognized, and the deterministic fixer calls `uv lock --upgrade-package` to update lockfiles correctly (no manual lockfile editing).
+- **Poetry support**: same idea via `poetry update <pkg>`.
+- **Smarter cross-target dedup**: same CVE reported under both `Python` and `uv.lock` collapses to one finding.
+- **Container-base aggregation**: when an image has dozens of OS-package CVEs (libncurses, libsystemd, ...), they now collapse to one Dockerfile-bump finding instead of N separate AI calls.
+- **AI refusal handling**: when Claude correctly decides no safe fix is possible (e.g. rolling base-image tags), the result is classified as a principled skip with the AI's reasoning, not a failure.
+- **Prompt delivery**: prompts are now sent to Claude Code via stdin instead of positional args (more robust across CLI versions).
+
+### v0.1.1
+
+- Fixed `--print` argument handling for Claude Code
+- Added container-base finding aggregation
+
+### v0.1.0
+
+- Per-repo config (`vulnfix.yml`) with per-scanner overrides for mode, severity threshold, ignored rules
+- Verification loop: every code fix is re-scanned; unverified changes roll back automatically
+- Cross-scanner dedup: same CVE reported by Trivy and Grype = one finding, one fix
+- Initial scanner support: Trivy, Bandit, Semgrep, gitleaks, Grype
+- Telemetry hook for the upcoming vulnfix Cloud dashboard (off by default, anonymized when on)
 
 ## Architecture
 
