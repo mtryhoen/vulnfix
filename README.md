@@ -1,10 +1,10 @@
 # vulnfix
 
-**AI-powered auto-remediation for security scanner findings.** Plug in your existing scanners (Trivy, Bandit, Semgrep, gitleaks, Grype), and vulnfix opens pull requests with real fixes — version bumps for dependencies, code refactors for SAST findings, **all re-scanned to confirm the vulnerability is actually gone before committing**.
+**AI-powered auto-remediation for security scanner findings.** Plug in your existing scanners (Trivy, Bandit, Semgrep, gitleaks, Grype), and vulnfix opens pull requests with real fixes - version bumps for dependencies, code refactors for SAST findings, **all re-scanned to confirm the vulnerability is actually gone before committing**.
 
 ## Why this exists
 
-Dependabot and Renovate bump versions. GitHub Advanced Security flags issues. Neither rewrites your `cursor.execute(f"…{user_input}…")` into a parameterized query. vulnfix uses Claude Code to do the actual remediation, **then re-runs the scanner to verify the fix worked** — if it didn't, the change is rolled back, not committed.
+Dependabot and Renovate bump versions. GitHub Advanced Security flags issues. Neither rewrites your `cursor.execute(f"…{user_input}…")` into a parameterized query. vulnfix uses Claude Code to do the actual remediation, **then re-runs the scanner to verify the fix worked** - if it didn't, the change is rolled back, not committed.
 
 ## Supported scanners (v0.1.2)
 
@@ -20,7 +20,7 @@ Dependabot and Renovate bump versions. GitHub Advanced Security flags issues. Ne
 
 ## Quick start
 
-**1.** Drop `vulnfix.yml` in your repo root (see `examples/vulnfix.yml` — every field optional):
+**1.** Drop `vulnfix.yml` in your repo root (see `examples/vulnfix.yml` - every field optional):
 
 ```yaml
 version: 1
