@@ -54,9 +54,24 @@ class DeterministicFixer:
         return FixResult(f.id, False, f"no deterministic fixer for ecosystem {eco}", [])
 
     def _bump_pypi(self, f: Finding, pkg: str, version: str) -> FixResult:
+        """Bump a Python package using the manager native to this repo.
+
+        Order of preference:
+          1. ``uv.lock`` present → run ``uv lock --upgrade-package pkg``
+          2. ``poetry.lock`` present → run ``poetry update pkg``
+          3. ``requirements.txt`` / ``pyproject.toml`` → regex rewrite
+        """
+        # 1. uv project — use uv to regenerate the lockfile properly
+        if (self.workdir / "uv.lock").exists():
+            return self._bump_with_uv(f, pkg, version)
+        # 2. Poetry project
+        if (self.workdir / "poetry.lock").exists():
+            return self._bump_with_poetry(f, pkg, version)
+
+        # 3. Fall back to text rewriting for plain manifests
         changed: list[str] = []
-        # We try the most common manifests; users can extend this list.
-        candidates = ["requirements.txt", "requirements/base.txt", "pyproject.toml"]
+        candidates = ["requirements.txt", "requirements/base.txt",
+                      "requirements/prod.txt", "pyproject.toml"]
         for rel in candidates:
             path = self.workdir / rel
             if not path.exists():
@@ -69,6 +84,65 @@ class DeterministicFixer:
         if changed:
             return FixResult(f.id, True, f"bumped {pkg} to {version}", changed)
         return FixResult(f.id, False, f"could not find {pkg} in known manifests", [])
+
+    def _bump_with_uv(self, f: Finding, pkg: str, version: str) -> FixResult:
+        """Use uv to upgrade a single package and regenerate the lockfile.
+
+        We try ``uv lock --upgrade-package pkg`` first (lets uv pick the
+        right version subject to existing constraints). If that doesn't
+        move the version far enough, we modify the constraint in
+        ``pyproject.toml`` and re-lock.
+        """
+        import shutil as _shutil
+        import subprocess as _sp
+        if not _shutil.which("uv"):
+            return FixResult(f.id, False,
+                             "uv project detected but `uv` CLI not on PATH "
+                             "(falling back: edit pyproject.toml manually)", [])
+
+        # First attempt: bump within the existing constraint
+        result = _sp.run(
+            ["uv", "lock", "--upgrade-package", f"{pkg}=={version}"],
+            cwd=str(self.workdir), capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            # The constraint in pyproject.toml is probably too tight.
+            # Edit pyproject.toml to widen, then retry.
+            py = self.workdir / "pyproject.toml"
+            if py.exists():
+                text = py.read_text(encoding="utf-8")
+                new_text = self._rewrite_pypi_requirement(text, pkg, version)
+                if new_text != text:
+                    py.write_text(new_text, encoding="utf-8")
+                    result = _sp.run(
+                        ["uv", "lock"],
+                        cwd=str(self.workdir), capture_output=True, text=True, timeout=120,
+                    )
+
+        if result.returncode != 0:
+            return FixResult(f.id, False,
+                             f"uv lock failed: {result.stderr.strip()[:200]}", [])
+
+        changed = ["uv.lock"]
+        if (self.workdir / "pyproject.toml").exists():
+            # pyproject may have been edited above
+            changed.append("pyproject.toml")
+        return FixResult(f.id, True, f"bumped {pkg} to {version} via uv", changed)
+
+    def _bump_with_poetry(self, f: Finding, pkg: str, version: str) -> FixResult:
+        import shutil as _shutil
+        import subprocess as _sp
+        if not _shutil.which("poetry"):
+            return FixResult(f.id, False,
+                             "poetry project detected but `poetry` CLI not on PATH", [])
+        result = _sp.run(
+            ["poetry", "update", pkg],
+            cwd=str(self.workdir), capture_output=True, text=True, timeout=180,
+        )
+        if result.returncode != 0:
+            return FixResult(f.id, False,
+                             f"poetry update failed: {result.stderr.strip()[:200]}", [])
+        return FixResult(f.id, True, f"bumped {pkg} via poetry", ["poetry.lock", "pyproject.toml"])
 
     @staticmethod
     def _rewrite_pypi_requirement(text: str, pkg: str, version: str) -> str:

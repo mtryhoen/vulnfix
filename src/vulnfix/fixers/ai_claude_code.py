@@ -31,6 +31,7 @@ class AIFixResult:
     summary: str
     files_changed: list[str]
     raw_output: str = ""
+    no_safe_change: bool = False   # True when AI deliberately made no change
 
 
 class ClaudeCodeFixer:
@@ -97,9 +98,22 @@ class ClaudeCodeFixer:
         except (json.JSONDecodeError, AttributeError):
             pass
 
+        # The AI may have intentionally decided no safe change was possible.
+        # That's a valid outcome — not a failure. We mark it as a no-op so
+        # the orchestrator can classify it as "skipped" rather than "failed".
+        if not changed:
+            return AIFixResult(
+                finding.id,
+                success=False,
+                summary=f"no change made: {summary}",
+                files_changed=[],
+                raw_output=result.stdout,
+                no_safe_change=True,
+            )
+
         return AIFixResult(
             finding.id,
-            success=bool(changed),
+            success=True,
             summary=summary,
             files_changed=changed,
             raw_output=result.stdout,

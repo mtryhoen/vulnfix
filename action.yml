@@ -49,6 +49,13 @@ runs:
       shell: bash
       run: npm install -g @anthropic-ai/claude-code
 
+    - name: Install uv (for uv-managed Python projects)
+      shell: bash
+      run: |
+        # uv is a single binary; cheap to install whether the repo uses it or not.
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
     - name: Install vulnfix
       shell: bash
       run: pip install --quiet ${{ github.action_path }}

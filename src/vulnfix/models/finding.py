@@ -88,6 +88,16 @@ class Finding:
 
     @property
     def dedupe_key(self) -> str:
-        """Two findings with the same key are the same vuln from different scanners."""
+        """Two findings with the same key are the same vuln from different scanners.
+
+        For dependency findings, we ignore the file path — Trivy often reports
+        the same CVE against the same package twice (once for a language label
+        like ``Python``, once for the lockfile). That's one finding, not two.
+
+        For code findings, the file+line matters: the same rule firing at two
+        different lines is two separate issues.
+        """
+        if self.fix.package_name:
+            return f"{self.rule_id}|{self.fix.package_name}|{self.fix.package_ecosystem or ''}"
         loc = f"{self.location.file_path or ''}:{self.location.start_line or 0}"
-        return f"{self.rule_id}|{self.fix.package_name or ''}|{loc}"
+        return f"{self.rule_id}|{loc}"

@@ -256,6 +256,10 @@ class Orchestrator:
 
         if result.success:
             report.fixed.append(result)
+        elif getattr(result, "no_safe_change", False):
+            # AI intentionally made no change — that's a valid outcome, not a failure.
+            report.skipped.append((finding, result.summary))
+            run_event.skipped.append({"finding_id": finding.id, "reason": result.summary[:200]})
         else:
             report.failed.append(result)
 

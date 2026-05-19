@@ -1,6 +1,6 @@
 [project]
 name = "vulnfix"
-version = "0.1.1"
+version = "0.1.2"
 description = "AI-powered auto-remediation for security scanner findings."
 readme = "README.md"
 requires-python = ">=3.10"

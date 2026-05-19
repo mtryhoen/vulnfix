@@ -113,7 +113,70 @@ class TestAdapters:
         assert f.fix.package_ecosystem == "pypi"
         assert f.fix.fixed_version == "2.31.0"
 
-    def test_trivy_container_base(self, tmp_path):
+    def test_trivy_recognizes_uv_lock(self, tmp_path):
+        """Trivy may report Python deps as Target=uv.lock or Target=Python."""
+        report = {
+            "SchemaVersion": 2, "ArtifactName": ".", "ArtifactType": "filesystem",
+            "Results": [
+                {
+                    "Target": "uv.lock", "Class": "lang-pkgs", "Type": "uv",
+                    "Vulnerabilities": [{
+                        "VulnerabilityID": "CVE-2026-41066", "PkgName": "lxml",
+                        "InstalledVersion": "6.0.2", "FixedVersion": "6.0.3",
+                        "Severity": "HIGH", "Title": "lxml: XXE", "Description": "x",
+                    }],
+                },
+                {
+                    "Target": "Python", "Class": "lang-pkgs", "Type": "python-pkg",
+                    "Vulnerabilities": [{
+                        "VulnerabilityID": "CVE-2026-41066", "PkgName": "lxml",
+                        "InstalledVersion": "6.0.2", "FixedVersion": "6.0.3",
+                        "Severity": "HIGH", "Title": "lxml: XXE", "Description": "x",
+                    }],
+                },
+            ],
+        }
+        findings = list(parse_report(_write(tmp_path, "t.json", report)))
+        # Both targets should yield findings with the pypi ecosystem
+        assert len(findings) == 2
+        for f in findings:
+            assert f.fix.package_ecosystem == "pypi"
+        # And they should have the same dedupe key (so the orchestrator collapses them)
+        assert findings[0].dedupe_key == findings[1].dedupe_key
+
+    def test_dedupe_collapses_python_and_uv_lock(self, tmp_path, monkeypatch):
+        """The Python label and uv.lock label report the same CVE — should be 1 finding."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+        from vulnfix.config import Config
+        from vulnfix.orchestrator import Orchestrator
+        report = {
+            "SchemaVersion": 2, "ArtifactName": ".", "ArtifactType": "filesystem",
+            "Results": [
+                {
+                    "Target": "uv.lock", "Class": "lang-pkgs",
+                    "Vulnerabilities": [{
+                        "VulnerabilityID": "CVE-X", "PkgName": "lxml",
+                        "InstalledVersion": "6.0.2", "FixedVersion": "6.0.3",
+                        "Severity": "HIGH", "Title": "t", "Description": "d",
+                    }],
+                },
+                {
+                    "Target": "Python", "Class": "lang-pkgs",
+                    "Vulnerabilities": [{
+                        "VulnerabilityID": "CVE-X", "PkgName": "lxml",
+                        "InstalledVersion": "6.0.2", "FixedVersion": "6.0.3",
+                        "Severity": "HIGH", "Title": "t", "Description": "d",
+                    }],
+                },
+            ],
+        }
+        rp = _write(tmp_path, "t.json", report)
+        config = Config()
+        config.ai.enabled = False
+        config.min_severity = Severity.LOW
+        orch = Orchestrator(workdir=tmp_path, config=config)
+        result = orch.run([rp])
+        assert result.total_findings == 1
         f = list(parse_report(_write(tmp_path, "t.json", TRIVY_IMAGE)))[0]
         assert f.kind == FindingKind.CONTAINER_BASE
         assert f.severity == Severity.CRITICAL

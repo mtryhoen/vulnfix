@@ -114,19 +114,45 @@ class TrivyAdapter(ScannerAdapter):
 
     @staticmethod
     def _ecosystem_from_target(target: str, klass: str) -> str | None:
+        """Map Trivy's `Target` + `Class` to a vulnfix ecosystem name.
+
+        Trivy can label the target as either a file path (``requirements.txt``,
+        ``uv.lock``) or just a package source name (``Python``, ``Node.js``)
+        depending on how the scan was configured. Handle both.
+        """
         t = target.lower()
-        if t.endswith("requirements.txt") or t.endswith("pyproject.toml") or t.endswith("poetry.lock") or t.endswith("pipfile.lock"):
+        # File-path-based detection (most common)
+        if any(t.endswith(s) for s in (
+            "requirements.txt", "pyproject.toml", "poetry.lock",
+            "pipfile.lock", "pipfile", "uv.lock", "pdm.lock",
+        )):
             return "pypi"
-        if t.endswith("package-lock.json") or t.endswith("yarn.lock") or t.endswith("package.json"):
+        if any(t.endswith(s) for s in (
+            "package-lock.json", "yarn.lock", "package.json", "pnpm-lock.yaml",
+        )):
             return "npm"
-        if t.endswith("go.sum") or t.endswith("go.mod"):
+        if any(t.endswith(s) for s in ("go.sum", "go.mod")):
             return "go"
-        if t.endswith("cargo.lock") or t.endswith("cargo.toml"):
+        if any(t.endswith(s) for s in ("cargo.lock", "cargo.toml")):
             return "cargo"
-        if t.endswith("gemfile.lock"):
+        if t.endswith("gemfile.lock") or t.endswith("gemfile"):
             return "rubygems"
-        if t.endswith("pom.xml") or t.endswith("build.gradle"):
+        if any(t.endswith(s) for s in ("pom.xml", "build.gradle", "build.gradle.kts")):
             return "maven"
+
+        # Fall back to Trivy's language label when no file path is available.
+        # Trivy sometimes reports e.g. Target="Python", Class="lang-pkgs".
+        label_map = {
+            "python": "pypi",
+            "node.js": "npm",
+            "go": "go",
+            "rust": "cargo",
+            "ruby": "rubygems",
+            "java": "maven",
+        }
+        if klass == "lang-pkgs" and t in label_map:
+            return label_map[t]
+
         if klass == "os-pkgs":
             return "os"
         return None
