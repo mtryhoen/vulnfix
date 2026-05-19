@@ -1,0 +1,53 @@
+# vulnfix.yml — drop at the root of your repo.
+# Every field has a sane default; this file shows all the levers.
+
+version: 1
+
+defaults:
+  # Lowest severity that gets a fix attempt. Findings below this are skipped.
+  min_severity: high     # critical | high | medium | low
+
+  # What to do with successful fixes:
+  #   pr            — open a pull request for human review (default, safest)
+  #   auto_merge    — open PR and auto-merge if CI passes (use with care)
+  #   comment_only  — surface the finding, don't change code
+  #   disabled      — ignore this scanner entirely
+  mode: pr
+
+  # Per-run cap. Stops a runaway scan from burning a thousand AI calls.
+  max_findings: 25
+
+# Per-scanner overrides. Anything not listed inherits `defaults`.
+scanners:
+  trivy:
+    mode: auto_merge        # version bumps are mechanical, we trust them
+  bandit:
+    mode: pr
+    ignore_rules:
+      - B101                # asserts in test files
+      - B404                # subprocess module imports
+  semgrep:
+    mode: pr
+  gitleaks:
+    mode: comment_only      # we want a human to rotate the secret
+  grype:
+    mode: auto_merge
+
+paths:
+  ignore:
+    - "tests/**"
+    - "vendor/**"
+    - "node_modules/**"
+    - "**/*.min.js"
+
+ai:
+  enabled: true
+  model: claude-opus-4-7
+  timeout_seconds: 300
+
+# Optional: send telemetry to vulnfix Cloud for cross-repo dashboards.
+# Set VULNFIX_API_KEY in your repo secrets to enable.
+telemetry:
+  # endpoint: https://api.vulnfix.io/v1/events
+  # api_key_env: VULNFIX_API_KEY
+  anonymous: true           # hash repo identifier before sending

@@ -1,0 +1,68 @@
+name: 'vulnfix'
+description: 'AI-powered auto-remediation for security scan findings (Trivy, Bandit, and more).'
+author: 'vulnfix'
+branding:
+  icon: 'shield'
+  color: 'green'
+
+inputs:
+  reports:
+    description: 'Space-separated list of scanner report paths (JSON/SARIF)'
+    required: true
+  min-severity:
+    description: 'Minimum severity to fix: critical|high|medium|low'
+    required: false
+    default: 'medium'
+  max-findings:
+    description: 'Maximum findings to attempt per run (cost guardrail)'
+    required: false
+    default: '50'
+  open-pr:
+    description: 'Open a PR with the fixes (true|false)'
+    required: false
+    default: 'true'
+  base-branch:
+    description: 'Base branch for the PR'
+    required: false
+    default: 'main'
+  use-ai:
+    description: 'Enable AI-powered code fixes (requires ANTHROPIC_API_KEY)'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Set up Node (for Claude Code)
+      if: ${{ inputs.use-ai == 'true' }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install Claude Code CLI
+      if: ${{ inputs.use-ai == 'true' }}
+      shell: bash
+      run: npm install -g @anthropic-ai/claude-code
+
+    - name: Install vulnfix
+      shell: bash
+      run: pip install --quiet ${{ github.action_path }}
+
+    - name: Run vulnfix
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY }}
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+      run: |
+        ARGS=( --reports ${{ inputs.reports }} \
+               --min-severity ${{ inputs.min-severity }} \
+               --max-findings ${{ inputs.max-findings }} \
+               --base-branch ${{ inputs.base-branch }} )
+        if [ "${{ inputs.use-ai }}" != "true" ]; then ARGS+=( --no-ai ); fi
+        if [ "${{ inputs.open-pr }}" = "true" ]; then ARGS+=( --open-pr ); fi
+        python -m vulnfix.cli "${ARGS[@]}"
