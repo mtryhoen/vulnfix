@@ -103,12 +103,18 @@ class DeterministicFixer:
     # Container base image bumps
     # ------------------------------------------------------------------
     def _fix_container_base(self, f: Finding) -> FixResult | None:
-        # Strategy: for OS-package CVEs, we typically can't fix the base
-        # image directly. We bump the base image tag if the user has set
-        # one we recognize, otherwise we hand off to the AI fixer.
+        """Container OS-package CVEs are fixed by updating the base image
+        tag in the Dockerfile, not by editing OS packages directly.
+
+        Since we don't have a registry to look up the latest patched tag,
+        we hand off to the AI fixer with a clear instruction. The AI fixer
+        is given a single aggregated finding (see orchestrator) so we
+        don't burn N calls on the same Dockerfile change.
+        """
         dockerfile = self.workdir / "Dockerfile"
         if not dockerfile.exists():
             return FixResult(f.id, False, "no Dockerfile at repo root", [])
-        # We don't auto-bump base images without knowing the latest secure tag,
-        # so this is intentionally a stub. The AI fixer is better for this.
+        # We deliberately return None so the orchestrator falls through to
+        # the AI fixer. Bumping a base image without checking the registry
+        # for an existing tag would break the build.
         return None

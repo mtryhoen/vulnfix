@@ -89,6 +89,7 @@ class Orchestrator:
 
         findings = list(self._collect(reports))
         findings = self._deduplicate(findings)
+        findings = self._aggregate_container_base(findings)
         findings = self._apply_config_filters(findings, run_event)
         findings = self._sort_and_cap(findings)
 
@@ -119,6 +120,58 @@ class Orchestrator:
             if key not in seen or _SEV_ORDER[f.severity] < _SEV_ORDER[seen[key].severity]:
                 seen[key] = f
         return list(seen.values())
+
+    @staticmethod
+    def _aggregate_container_base(findings: list[Finding]) -> list[Finding]:
+        """Collapse all CONTAINER_BASE findings into one synthetic finding
+        per Dockerfile target.
+
+        Why: a base image like ``debian:13.4`` typically produces dozens of
+        OS-package CVEs (libncurses, libsystemd, libssl, ...). They share
+        one fix — bump the base image tag — so making N LLM calls is waste.
+        We pass a single aggregated finding with the full package list so
+        the AI fixer can make an informed Dockerfile edit.
+        """
+        from vulnfix.models.finding import FindingKind, FixHint, Location
+
+        kept: list[Finding] = []
+        groups: dict[str, list[Finding]] = {}
+        for f in findings:
+            if f.kind == FindingKind.CONTAINER_BASE:
+                # Group by the scanner's "target" (the image+OS string).
+                key = f.location.file_path or "container"
+                groups.setdefault(key, []).append(f)
+            else:
+                kept.append(f)
+
+        for target, group in groups.items():
+            # Pick the worst severity seen in the group.
+            worst = min(group, key=lambda g: _SEV_ORDER[g.severity]).severity
+            # Build a compact list of vulnerable packages for the prompt.
+            pkgs = sorted({
+                f"{f.fix.package_name}@{f.raw.get('InstalledVersion', '?')}"
+                for f in group if f.fix.package_name
+            })
+            cves = sorted({f.rule_id for f in group})
+            kept.append(Finding(
+                id=f"aggregated:container_base:{target}",
+                scanner="vulnfix",  # synthetic source
+                rule_id="CONTAINER_BASE_BUMP",
+                title=f"Update base image (affects {len(group)} CVE(s) in {len(pkgs)} package(s))",
+                description=(
+                    f"The base image for {target} contains vulnerable OS packages.\n\n"
+                    f"CVEs: {', '.join(cves[:10])}{' ...' if len(cves) > 10 else ''}\n"
+                    f"Affected packages: {', '.join(pkgs[:15])}{' ...' if len(pkgs) > 15 else ''}\n\n"
+                    "Fix by bumping the FROM tag in the Dockerfile to a more recent "
+                    "patched release of the same image family."
+                ),
+                severity=worst,
+                kind=FindingKind.CONTAINER_BASE,
+                location=Location(file_path="Dockerfile"),
+                fix=FixHint(),
+                raw={"aggregated_findings": [f.id for f in group]},
+            ))
+        return kept
 
     def _apply_config_filters(
         self, findings: list[Finding], run_event: RunEvent

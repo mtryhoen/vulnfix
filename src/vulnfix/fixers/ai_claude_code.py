@@ -56,6 +56,9 @@ class ClaudeCodeFixer:
         before = self._snapshot_mtimes()
 
         try:
+            # Pass the prompt via stdin so we don't depend on positional-arg
+            # ordering across Claude Code versions, and so long prompts with
+            # shell-special characters don't get mangled.
             result = subprocess.run(
                 [
                     "claude",
@@ -64,8 +67,8 @@ class ClaudeCodeFixer:
                     "--model", self.model,
                     # Only allow tools we actually want it to use during fixes:
                     "--allowedTools", "Read,Edit,Write,Grep,Glob,Bash(pytest:*),Bash(npm test:*)",
-                    prompt,
                 ],
+                input=prompt,
                 cwd=str(self.workdir),
                 capture_output=True,
                 text=True,
@@ -125,8 +128,17 @@ class ClaudeCodeFixer:
                 "introduce new resources."
             ),
             FindingKind.CONTAINER_BASE: (
-                "Update the Dockerfile base image to a patched version (prefer the "
-                "latest LTS/stable tag from the same image family)."
+                "Update the Dockerfile's FROM line to a more recent patched tag of "
+                "the same image family. Steps:\n"
+                "  1. Read the Dockerfile and identify the current base image tag.\n"
+                "  2. Pick a small, conservative bump: prefer the next minor/patch tag "
+                "in the same family (e.g. debian:13.4 -> debian:13.5, python:3.11.5 -> "
+                "python:3.11.10) rather than switching distros or major versions.\n"
+                "  3. If a date-stamped tag is in use (e.g. debian:trixie-20250216), "
+                "bump to a more recent date stamp from the same codename.\n"
+                "  4. Do not invent tags. If you are not confident a specific tag "
+                "exists, leave the file unchanged and explain why.\n"
+                "  5. Touch only the FROM line(s) — do not refactor the rest of the Dockerfile."
             ),
             FindingKind.DEPENDENCY: (
                 "Update the dependency manifest to the fixed version. If the fix "
