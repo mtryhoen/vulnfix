@@ -7,6 +7,7 @@ and code/IaC findings under ``Results[].Misconfigurations`` or ``Results[].Secre
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Iterable
 
@@ -18,6 +19,25 @@ from vulnfix.models.finding import (
     Severity,
 )
 from vulnfix.scanners.base import ScannerAdapter
+
+
+def _split_version(v: str) -> list[int]:
+    """Parse a version like '1.3.0' or '1.3.0a2' into [1, 3, 0].
+
+    Non-numeric suffixes (pre-release tags, build metadata) are dropped —
+    we only need this for coarse-grained "are these on the same major line"
+    comparisons, not strict semver compliance.
+    """
+    if not v:
+        return []
+    out: list[int] = []
+    for part in re.split(r"[.\-+]", v):
+        m = re.match(r"^(\d+)", part)
+        if m:
+            out.append(int(m.group(1)))
+        else:
+            break
+    return out
 
 
 class TrivyAdapter(ScannerAdapter):
@@ -46,7 +66,7 @@ class TrivyAdapter(ScannerAdapter):
     def _parse_vuln(self, v: dict, target: str, artifact_type: str, klass: str) -> Finding:
         pkg = v.get("PkgName", "")
         installed = v.get("InstalledVersion", "")
-        fixed = v.get("FixedVersion") or None
+        fixed = self._pick_fixed_version(v.get("FixedVersion"), installed)
         cve = v.get("VulnerabilityID", "UNKNOWN")
 
         # Decide if this is a container-base bump or a manifest dep bump
@@ -111,6 +131,48 @@ class TrivyAdapter(ScannerAdapter):
             ),
             raw=s,
         )
+
+    @staticmethod
+    def _pick_fixed_version(fixed_field, installed: str) -> str | None:
+        """Trivy's ``FixedVersion`` can be a comma-separated list when the
+        CVE is patched on multiple release lines (e.g. ``"1.3.3, 0.3.85"``
+        means both 1.3.3 and 0.3.85 fix it).
+
+        We pick the candidate that:
+          1. Shares the largest leading-component prefix with the installed
+             version (same major, ideally same minor), AND
+          2. Is >= installed (we never downgrade).
+
+        If nothing qualifies, fall back to the first listed version.
+        """
+        if not fixed_field:
+            return None
+        # Split on comma, semicolon, or whitespace; strip empties.
+        candidates = [
+            c.strip() for c in re.split(r"[,\s;]+", fixed_field) if c.strip()
+        ]
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0]
+
+        installed_parts = _split_version(installed)
+
+        def score(candidate: str) -> tuple[int, int, list[int]]:
+            cand_parts = _split_version(candidate)
+            # How many leading components match installed?
+            shared = 0
+            for a, b in zip(installed_parts, cand_parts):
+                if a == b:
+                    shared += 1
+                else:
+                    break
+            not_downgrade = 1 if cand_parts >= installed_parts else 0
+            # Higher shared prefix wins; prefer non-downgrades; among ties
+            # prefer the lower candidate version (closer-in patch).
+            return (not_downgrade, shared, [-x for x in cand_parts])
+
+        return max(candidates, key=score)
 
     @staticmethod
     def _ecosystem_from_target(target: str, klass: str) -> str | None:

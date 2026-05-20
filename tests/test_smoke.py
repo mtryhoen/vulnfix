@@ -113,6 +113,27 @@ class TestAdapters:
         assert f.fix.package_ecosystem == "pypi"
         assert f.fix.fixed_version == "2.31.0"
 
+    def test_trivy_picks_fix_version_on_same_major_line(self, tmp_path):
+        """When Trivy reports multiple fix versions, pick the one closest
+        to the installed major line — not a downgrade across majors."""
+        report = {
+            "SchemaVersion": 2, "ArtifactName": ".", "ArtifactType": "filesystem",
+            "Results": [{
+                "Target": "uv.lock", "Class": "lang-pkgs",
+                "Vulnerabilities": [{
+                    "VulnerabilityID": "CVE-2026-44843", "PkgName": "langchain-core",
+                    "InstalledVersion": "1.3.0",
+                    "FixedVersion": "1.3.3, 0.3.85",  # the real bug
+                    "Severity": "HIGH", "Title": "x", "Description": "y",
+                }],
+            }],
+        }
+        f = list(parse_report(_write(tmp_path, "t.json", report)))[0]
+        # Must pick 1.3.3 (same major as installed), not 0.3.85 (downgrade)
+        assert f.fix.fixed_version == "1.3.3"
+        # And it must NOT be the raw comma-joined string
+        assert "," not in (f.fix.fixed_version or "")
+
     def test_trivy_recognizes_uv_lock(self, tmp_path):
         """Trivy may report Python deps as Target=uv.lock or Target=Python."""
         report = {
